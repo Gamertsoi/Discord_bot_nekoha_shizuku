@@ -6,6 +6,9 @@ const { Client, Events, GatewayIntentBits, Partials, PermissionsBitField } = req
 const token = process.env.TOKEN;
 const { handleMsg, handleMsgRole, handleClr, handleSet } = require('./commands');
 const { reactionMatches } = require('./emojiUtils');
+const PERM_FILE = path.join(__dirname, 'permissions.json');
+let commandPermissions = {};
+const { pushFileToGitHub } = require('./githubSync');
 
 const PREFIX = '!';
 const OWNER_ID = process.env.OWNER_ID; // Optional: restrict certain commands to this user ID
@@ -50,7 +53,35 @@ async function saveMappings() {
 	}
 	await fs.writeFile(DATA_FILE, JSON.stringify(obj, null, 2), 'utf8');
 	console.log('Saved reaction-role mappings to disk.');
+
+	// Best-effort push to GitHub (optional)
+	const githubToken = process.env.GITHUB_TOKEN;
+	const githubOwner = process.env.GITHUB_OWNER;
+	const githubRepo = process.env.GITHUB_REPO;
+	const githubBranch = process.env.GITHUB_BRANCH || 'main';
+
+	if (githubToken && githubOwner && githubRepo) {
+		try {
+			await pushFileToGitHub({
+				owner: githubOwner,
+				repo: githubRepo,
+				path: path.basename(DATA_FILE), // 'reactionRoleMap.json'
+				branch: githubBranch,
+				contentObj: obj,
+				token: githubToken,
+				commitMessage: `Auto-update ${path.basename(DATA_FILE)} by bot`,
+			});
+			console.log('Pushed reaction-role mappings to GitHub.');
+		}
+		catch (err) {
+			console.warn('Failed to push reaction-role mappings to GitHub:', err.message);
+		}
+	}
+	else {
+		console.log('GitHub push skipped: missing GITHUB_TOKEN/GITHUB_OWNER/GITHUB_REPO env vars.');
+	}
 }
+
 
 loadMappings().catch(err => console.error('loadMappings error:', err));
 
@@ -60,49 +91,67 @@ process.on('unhandledRejection', (reason, promise) => {
 });
 
 // --- Permissions store ---
-const PERM_FILE = path.join(__dirname, 'permissions.json');
-let commandPermissions = {};
-
 async function loadPermissions() {
-  try {
-    const raw = await fs.readFile(PERM_FILE, 'utf8');
-    commandPermissions = JSON.parse(raw) || {};
-    console.log('Loaded command permissions.');
-  } catch (err) {
-    if (err && err.code === 'ENOENT') {
-      console.log('No permissions file, starting fresh.');
-      commandPermissions = {};
-    } else {
-      console.error('Failed to load permissions:', err);
-      commandPermissions = {};
-    }
-  }
+	try {
+		const raw = await fs.readFile(PERM_FILE, 'utf8');
+		commandPermissions = JSON.parse(raw) || {};
+		console.log('Loaded command permissions.');
+	}
+	catch (err) {
+		if (err && err.code === 'ENOENT') {
+			console.log('No permissions file, starting fresh.');
+			commandPermissions = {};
+		}
+		else {
+			console.error('Failed to load permissions:', err);
+			commandPermissions = {};
+		}
+	}
 }
 
 async function savePermissions() {
-  await fs.writeFile(PERM_FILE, JSON.stringify(commandPermissions, null, 2), 'utf8');
-  console.log('Saved command permissions.');
+	await fs.writeFile(PERM_FILE, JSON.stringify(commandPermissions, null, 2), 'utf8');
+	console.log('Saved command permissions locally.');
+
+	if (process.env.GITHUB_TOKEN && process.env.GITHUB_OWNER && process.env.GITHUB_REPO) {
+		try {
+			await pushFileToGitHub({
+				owner: process.env.GITHUB_OWNER,
+				repo: process.env.GITHUB_REPO,
+				path: path.basename(PERM_FILE), // 'permissions.json'
+				branch: process.env.GITHUB_BRANCH || 'main',
+				contentObj: commandPermissions,
+				token: process.env.GITHUB_TOKEN,
+				commitMessage: `Auto-update ${path.basename(PERM_FILE)} by bot`,
+			});
+			console.log('Pushed permissions.json to GitHub.');
+		}
+		catch (err) {
+			console.warn('Failed to push permissions to GitHub:', err.message);
+		}
+	}
 }
 
 loadPermissions().catch(console.error);
 
 // Permission check: owner always allowed; if command has roles, member must have at least one
 function canRunCommand(command, member) {
-  if (!member) return false; // safety
-  if (member.id === OWNER_ID) return true;
+	if (!member) return false; // safety
+	if (member.id === OWNER_ID) return true;
 
-  const required = commandPermissions[command];
-  if (!required || required.length === 0) {
-    // no roles configured → only owner allowed
-    return false;
-  }
+	const required = commandPermissions[command];
+	if (!required || required.length === 0) {
+		// no roles configured → only owner allowed
+		return false;
+	}
 
-  // member must have at least one of the required roles
-  for (const roleId of required) {
-    if (member.roles.cache.has(roleId)) return true;
-  }
-  return false;
+	// member must have at least one of the required roles
+	for (const roleId of required) {
+		if (member.roles.cache.has(roleId)) return true;
+	}
+	return false;
 }
+
 // --- Message handler ---
 client.on(Events.MessageCreate, async (message) => {
 	if (message.author.bot) return;
@@ -246,6 +295,3 @@ client.once(Events.ClientReady, (readyClient) => {
 });
 
 client.login(token);
-
-
-
