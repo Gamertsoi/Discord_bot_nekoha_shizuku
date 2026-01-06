@@ -3,7 +3,7 @@
 const fs = require('fs').promises;
 const path = require('path');
 const { Client, Events, GatewayIntentBits, Partials, PermissionsBitField } = require('discord.js');
-const { token } = process.env.TOKEN;
+const token = process.env.TOKEN;
 const { handleMsg, handleMsgRole, handleClr, handleSet } = require('./commands');
 const { reactionMatches } = require('./emojiUtils');
 
@@ -235,4 +235,5 @@ client.once(Events.ClientReady, (readyClient) => {
 });
 
 client.login(token);
+
 
