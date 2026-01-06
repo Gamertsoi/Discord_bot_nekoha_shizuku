@@ -1,9 +1,9 @@
 {
-  "name": "discord-bot",
+  "name": "Discord_bot_Nekoha_Shizuku",
   "version": "1.0.0",
-  "description": "",
+  "description": "simple function dc bot",
   "license": "ISC",
-  "author": "",
+  "author": "Gamertsoi",
   "type": "commonjs",
   "main": "index.js",
   "scripts": {
