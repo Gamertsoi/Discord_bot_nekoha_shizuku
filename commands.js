@@ -2,6 +2,28 @@
 const { PermissionsBitField } = require('discord.js');
 const { normalizeEmojiInput } = require('./emojiUtils');
 
+// handleSet
+async function handleSet(message, args, commandPermissions, savePermissions) {
+	if (args.length < 2) {
+		return message.channel.send('Usage: !set <command> <role_name_or_id_or_mention>');
+	}
+
+	const targetCmd = args[0].toLowerCase();
+	const roleArg = args.slice(1).join(' ');
+
+	const role = message.mentions.roles.first() ||
+             message.guild.roles.cache.get(roleArg) ||
+             message.guild.roles.cache.find(r => r.name === roleArg) ||
+             message.guild.roles.cache.find(r => r.name.toLowerCase() === roleArg.toLowerCase());
+
+	if (!role) return message.channel.send('Role not found.');
+
+	commandPermissions[targetCmd] = role.id;
+	await savePermissions();
+
+	return message.channel.send(`Set command \`${targetCmd}\` to require role ${role.name}.`);
+}
+
 // handleMsg
 async function handleMsg(message, args) {
 	const rawTarget = args[0];
@@ -362,7 +384,10 @@ async function handleClr(message, args) {
 }
 
 module.exports = {
+	handleSet,
 	handleMsg,
 	handleMsgRole,
 	handleClr,
 };
+
+
