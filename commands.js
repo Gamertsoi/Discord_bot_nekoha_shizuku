@@ -2,40 +2,75 @@
 const { PermissionsBitField } = require('discord.js');
 const { normalizeEmojiInput } = require('./emojiUtils');
 
-// handleSet
+// handleSet: add/remove/list permitted roles for commands
 async function handleSet(message, args, commandPermissions, savePermissions) {
-  // --- List mode ---
+  // Usage: !set list
   if (args.length === 1 && args[0].toLowerCase() === 'list') {
-    if (Object.keys(commandPermissions).length === 0) {
+    const entries = Object.entries(commandPermissions || {});
+    if (entries.length === 0) {
       return message.channel.send('No command restrictions have been set.');
     }
 
     const lines = [];
-    for (const [cmd, roleId] of Object.entries(commandPermissions)) {
-      const role = message.guild.roles.cache.get(roleId);
-      const roleName = role ? role.name : '(deleted role)';
-      lines.push(`${cmd} → ${roleName} (<@&${roleId}>)`);
+    for (const [cmd, roleIds] of entries) {
+      const roleNames = roleIds
+        .map(id => {
+          const r = message.guild.roles.cache.get(id);
+          return r ? `${r.name} (<@&${id}>)` : `(deleted role: ${id})`;
+        })
+        .join(', ');
+      lines.push(`${cmd} → ${roleNames}`);
     }
 
-    const output = lines.join('\n');
-    return message.channel.send('**Current command restrictions:**\n' + output);
+    // chunk output if too long
+    const chunkSize = 1900;
+    let out = '**Current command restrictions:**\n';
+    for (const line of lines) {
+      if ((out + line + '\n').length > chunkSize) {
+        await message.channel.send(out);
+        out = '';
+      }
+      out += line + '\n';
+    }
+    if (out.length > 0) await message.channel.send(out);
+    return;
   }
 
-  // --- Remove mode ---
+  // permission to run !set: owner or a configured "set-admin" role (optional)
+  // If you want to restrict who can run !set, check here (example: owner only)
+  const isOwner = message.author.id === OWNER_ID;
+  // allow owner only by default; if you want a role to also be able to set, add logic here
+  if (!isOwner) {
+    return message.channel.send('Only the bot owner can manage command permissions.');
+  }
+
+  // Remove mode: !set <cmd> <role> remove
   if (args.length >= 2 && args[args.length - 1].toLowerCase() === 'remove') {
     const targetCmd = args[0].toLowerCase();
-    if (commandPermissions[targetCmd]) {
-      delete commandPermissions[targetCmd];
-      await savePermissions();
-      return message.channel.send(`Removed permission restriction for command \`${targetCmd}\`.`);
-    } else {
-      return message.channel.send(`No permission restriction found for command \`${targetCmd}\`.`);
+    const roleArg = args.slice(1, -1).join(' ');
+    const role = message.mentions.roles.first() ||
+                 message.guild.roles.cache.get(roleArg) ||
+                 message.guild.roles.cache.find(r => r.name === roleArg) ||
+                 message.guild.roles.cache.find(r => r.name.toLowerCase() === roleArg.toLowerCase());
+
+    if (!role) return message.channel.send('Role not found.');
+
+    const arr = commandPermissions[targetCmd] || [];
+    const filtered = arr.filter(id => id !== role.id);
+    if (filtered.length === arr.length) {
+      return message.channel.send(`Role ${role.name} was not permitted for command \`${targetCmd}\`.`);
     }
+
+    if (filtered.length === 0) delete commandPermissions[targetCmd];
+    else commandPermissions[targetCmd] = filtered;
+
+    await savePermissions();
+    return message.channel.send(`Removed role ${role.name} from permitted list for \`${targetCmd}\`.`);
   }
 
-  // --- Normal set mode ---
+  // Add mode: !set <cmd> <role>
   if (args.length < 2) {
-    return message.channel.send('Usage: !set <command> <role_name_or_id_or_mention> [remove]');
+    return message.channel.send('Usage: !set <command> <role_name_or_id_or_mention> | !set <command> <role> remove | !set list');
   }
 
   const targetCmd = args[0].toLowerCase();
@@ -48,10 +83,16 @@ async function handleSet(message, args, commandPermissions, savePermissions) {
 
   if (!role) return message.channel.send('Role not found.');
 
-  commandPermissions[targetCmd] = role.id;
+  const arr = commandPermissions[targetCmd] || [];
+  if (arr.includes(role.id)) {
+    return message.channel.send(`Role ${role.name} is already permitted to use \`${targetCmd}\`.`);
+  }
+
+  arr.push(role.id);
+  commandPermissions[targetCmd] = arr;
   await savePermissions();
 
-  return message.channel.send(`Set command \`${targetCmd}\` to require role ${role.name}.`);
+  return message.channel.send(`Added role ${role.name} to permitted list for \`${targetCmd}\`.`);
 }
 
 // handleMsg
@@ -419,6 +460,7 @@ module.exports = {
 	handleMsgRole,
 	handleClr,
 };
+
 
 
 
