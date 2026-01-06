@@ -4,15 +4,26 @@ const { normalizeEmojiInput } = require('./emojiUtils');
 
 // handleSet
 async function handleSet(message, args, commandPermissions, savePermissions) {
-  if (args.length < 2) {
-    return message.channel.send('Usage: !set <command> <role_name_or_id_or_mention> [remove]');
+  // --- List mode ---
+  if (args.length === 1 && args[0].toLowerCase() === 'list') {
+    if (Object.keys(commandPermissions).length === 0) {
+      return message.channel.send('No command restrictions have been set.');
+    }
+
+    const lines = [];
+    for (const [cmd, roleId] of Object.entries(commandPermissions)) {
+      const role = message.guild.roles.cache.get(roleId);
+      const roleName = role ? role.name : '(deleted role)';
+      lines.push(`${cmd} → ${roleName} (<@&${roleId}>)`);
+    }
+
+    const output = lines.join('\n');
+    return message.channel.send('**Current command restrictions:**\n' + output);
   }
 
-  const targetCmd = args[0].toLowerCase();
-  const lastArg = args[args.length - 1].toLowerCase();
-
   // --- Remove mode ---
-  if (lastArg === 'remove') {
+  if (args.length >= 2 && args[args.length - 1].toLowerCase() === 'remove') {
+    const targetCmd = args[0].toLowerCase();
     if (commandPermissions[targetCmd]) {
       delete commandPermissions[targetCmd];
       await savePermissions();
@@ -23,7 +34,13 @@ async function handleSet(message, args, commandPermissions, savePermissions) {
   }
 
   // --- Normal set mode ---
+  if (args.length < 2) {
+    return message.channel.send('Usage: !set <command> <role_name_or_id_or_mention> [remove]');
+  }
+
+  const targetCmd = args[0].toLowerCase();
   const roleArg = args.slice(1).join(' ');
+
   const role = message.mentions.roles.first() ||
                message.guild.roles.cache.get(roleArg) ||
                message.guild.roles.cache.find(r => r.name === roleArg) ||
@@ -402,6 +419,7 @@ module.exports = {
 	handleMsgRole,
 	handleClr,
 };
+
 
 
 
