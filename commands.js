@@ -4,24 +4,37 @@ const { normalizeEmojiInput } = require('./emojiUtils');
 
 // handleSet
 async function handleSet(message, args, commandPermissions, savePermissions) {
-	if (args.length < 2) {
-		return message.channel.send('Usage: !set <command> <role_name_or_id_or_mention>');
-	}
+  if (args.length < 2) {
+    return message.channel.send('Usage: !set <command> <role_name_or_id_or_mention> [remove]');
+  }
 
-	const targetCmd = args[0].toLowerCase();
-	const roleArg = args.slice(1).join(' ');
+  const targetCmd = args[0].toLowerCase();
+  const lastArg = args[args.length - 1].toLowerCase();
 
-	const role = message.mentions.roles.first() ||
-             message.guild.roles.cache.get(roleArg) ||
-             message.guild.roles.cache.find(r => r.name === roleArg) ||
-             message.guild.roles.cache.find(r => r.name.toLowerCase() === roleArg.toLowerCase());
+  // --- Remove mode ---
+  if (lastArg === 'remove') {
+    if (commandPermissions[targetCmd]) {
+      delete commandPermissions[targetCmd];
+      await savePermissions();
+      return message.channel.send(`Removed permission restriction for command \`${targetCmd}\`.`);
+    } else {
+      return message.channel.send(`No permission restriction found for command \`${targetCmd}\`.`);
+    }
+  }
 
-	if (!role) return message.channel.send('Role not found.');
+  // --- Normal set mode ---
+  const roleArg = args.slice(1).join(' ');
+  const role = message.mentions.roles.first() ||
+               message.guild.roles.cache.get(roleArg) ||
+               message.guild.roles.cache.find(r => r.name === roleArg) ||
+               message.guild.roles.cache.find(r => r.name.toLowerCase() === roleArg.toLowerCase());
 
-	commandPermissions[targetCmd] = role.id;
-	await savePermissions();
+  if (!role) return message.channel.send('Role not found.');
 
-	return message.channel.send(`Set command \`${targetCmd}\` to require role ${role.name}.`);
+  commandPermissions[targetCmd] = role.id;
+  await savePermissions();
+
+  return message.channel.send(`Set command \`${targetCmd}\` to require role ${role.name}.`);
 }
 
 // handleMsg
@@ -389,5 +402,6 @@ module.exports = {
 	handleMsgRole,
 	handleClr,
 };
+
 
 
