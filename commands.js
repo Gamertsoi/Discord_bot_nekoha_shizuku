@@ -1,7 +1,7 @@
 // commands.js
 const { PermissionsBitField } = require('discord.js');
 const { normalizeEmojiInput } = require('./emojiUtils');
-
+const OWNER_ID = process.env.OWNER_ID;
 // handleSet: add/remove/list permitted roles for commands
 async function handleSet(message, args, commandPermissions, savePermissions) {
   // Usage: !set list
@@ -460,6 +460,7 @@ module.exports = {
 	handleMsgRole,
 	handleClr,
 };
+
 
 
 
