@@ -64,33 +64,44 @@ const PERM_FILE = path.join(__dirname, 'permissions.json');
 let commandPermissions = {};
 
 async function loadPermissions() {
-	try {
-		const raw = await fs.readFile(PERM_FILE, 'utf8');
-		commandPermissions = JSON.parse(raw);
-		console.log('Loaded command permissions.');
-	}
-	catch {
-		console.log('No permissions file, starting fresh.');
-		commandPermissions = {};
-	}
+  try {
+    const raw = await fs.readFile(PERM_FILE, 'utf8');
+    commandPermissions = JSON.parse(raw) || {};
+    console.log('Loaded command permissions.');
+  } catch (err) {
+    if (err && err.code === 'ENOENT') {
+      console.log('No permissions file, starting fresh.');
+      commandPermissions = {};
+    } else {
+      console.error('Failed to load permissions:', err);
+      commandPermissions = {};
+    }
+  }
 }
 
 async function savePermissions() {
-	await fs.writeFile(PERM_FILE, JSON.stringify(commandPermissions, null, 2), 'utf8');
-	console.log('Saved command permissions.');
+  await fs.writeFile(PERM_FILE, JSON.stringify(commandPermissions, null, 2), 'utf8');
+  console.log('Saved command permissions.');
 }
 
-loadPermissions();
+loadPermissions().catch(console.error);
 
-// --- Permission check helper ---
+// Permission check: owner always allowed; if command has roles, member must have at least one
 function canRunCommand(command, member) {
-	// Owner always allowed
-	if (member.id === OWNER_ID) return true;
+  if (!member) return false; // safety
+  if (member.id === OWNER_ID) return true;
 
-	const requiredRoleId = commandPermissions[command];
-	if (!requiredRoleId) return true; // no restriction set
+  const required = commandPermissions[command];
+  if (!required || required.length === 0) {
+    // no roles configured → only owner allowed
+    return false;
+  }
 
-	return member.roles.cache.has(requiredRoleId);
+  // member must have at least one of the required roles
+  for (const roleId of required) {
+    if (member.roles.cache.has(roleId)) return true;
+  }
+  return false;
 }
 // --- Message handler ---
 client.on(Events.MessageCreate, async (message) => {
@@ -235,5 +246,6 @@ client.once(Events.ClientReady, (readyClient) => {
 });
 
 client.login(token);
+
 
 
