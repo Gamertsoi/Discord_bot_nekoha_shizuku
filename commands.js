@@ -4,96 +4,97 @@ const { normalizeEmojiInput } = require('./emojiUtils');
 const OWNER_ID = process.env.OWNER_ID;
 // handleSet: add/remove/list permitted roles for commands
 async function handleSet(message, args, commandPermissions, savePermissions) {
-  // Usage: !set list
-  if (args.length === 1 && args[0].toLowerCase() === 'list') {
-    const entries = Object.entries(commandPermissions || {});
-    if (entries.length === 0) {
-      return message.channel.send('No command restrictions have been set.');
-    }
+	// Usage: !set list
+	if (args.length === 1 && args[0].toLowerCase() === 'list') {
+		const entries = Object.entries(commandPermissions || {});
+		if (entries.length === 0) {
+			return message.channel.send('No command restrictions have been set.');
+		}
 
-    const lines = [];
-    for (const [cmd, roleIds] of entries) {
-      const roleNames = roleIds
-        .map(id => {
-          const r = message.guild.roles.cache.get(id);
-          return r ? `${r.name} (<@&${id}>)` : `(deleted role: ${id})`;
-        })
-        .join(', ');
-      lines.push(`${cmd} → ${roleNames}`);
-    }
+		const lines = [];
+		for (const [cmd, roleIds] of entries) {
+			const roleNames = roleIds
+				.map(id => {
+					const r = message.guild.roles.cache.get(id);
+					return r ? `${r.name} (<@&${id}>)` : `(deleted role: ${id})`;
+				})
+				.join(', ');
+			lines.push(`${cmd} → ${roleNames}`);
+		}
 
-    // chunk output if too long
-    const chunkSize = 1900;
-    let out = '**Current command restrictions:**\n';
-    for (const line of lines) {
-      if ((out + line + '\n').length > chunkSize) {
-        await message.channel.send(out);
-        out = '';
-      }
-      out += line + '\n';
-    }
-    if (out.length > 0) await message.channel.send(out);
-    return;
-  }
+		// chunk output if too long
+		const chunkSize = 1900;
+		let out = '**Current command restrictions:**\n';
+		for (const line of lines) {
+			if ((out + line + '\n').length > chunkSize) {
+				await message.channel.send(out);
+				out = '';
+			}
+			out += line + '\n';
+		}
+		if (out.length > 0) await message.channel.send(out);
+		return;
+	}
 
-  // permission to run !set: owner or a configured "set-admin" role (optional)
-  // If you want to restrict who can run !set, check here (example: owner only)
-  const isOwner = message.author.id === OWNER_ID;
-  // allow owner only by default; if you want a role to also be able to set, add logic here
-  if (!isOwner) {
-    return message.channel.send('Only the bot owner can manage command permissions.');
-  }
+	// permission to run !set: owner or a configured "set-admin" role (optional)
+	// If you want to restrict who can run !set, check here (example: owner only)
+	const isOwner = message.author.id === OWNER_ID;
+	// allow owner only by default; if you want a role to also be able to set, add logic here
+	if (!isOwner) {
+		return message.channel.send('Only the bot owner can manage command permissions.');
+	}
 
-  // Remove mode: !set <cmd> <role> remove
-  if (args.length >= 2 && args[args.length - 1].toLowerCase() === 'remove') {
-    const targetCmd = args[0].toLowerCase();
-    const roleArg = args.slice(1, -1).join(' ');
-    const role = message.mentions.roles.first() ||
+	// Remove mode: !set <cmd> <role> remove
+	if (args.length >= 2 && args[args.length - 1].toLowerCase() === 'remove') {
+		const targetCmd = args[0].toLowerCase();
+		const roleArg = args.slice(1, -1).join(' ');
+		const role = message.mentions.roles.first() ||
                  message.guild.roles.cache.get(roleArg) ||
                  message.guild.roles.cache.find(r => r.name === roleArg) ||
                  message.guild.roles.cache.find(r => r.name.toLowerCase() === roleArg.toLowerCase());
 
-    if (!role) return message.channel.send('Role not found.');
+		if (!role) return message.channel.send('Role not found.');
 
-    const arr = commandPermissions[targetCmd] || [];
-    const filtered = arr.filter(id => id !== role.id);
-    if (filtered.length === arr.length) {
-      return message.channel.send(`Role ${role.name} was not permitted for command \`${targetCmd}\`.`);
-    }
+		const arr = commandPermissions[targetCmd] || [];
+		const filtered = arr.filter(id => id !== role.id);
+		if (filtered.length === arr.length) {
+			return message.channel.send(`Role ${role.name} was not permitted for command \`${targetCmd}\`.`);
+		}
 
-    if (filtered.length === 0) delete commandPermissions[targetCmd];
-    else commandPermissions[targetCmd] = filtered;
+		if (filtered.length === 0) delete commandPermissions[targetCmd];
+		else commandPermissions[targetCmd] = filtered;
 
-    await savePermissions();
-    return message.channel.send(`Removed role ${role.name} from permitted list for \`${targetCmd}\`.`);
-  }
+		await savePermissions();
+		return message.channel.send(`Removed role ${role.name} from permitted list for \`${targetCmd}\`.`);
+	}
 
-  // Add mode: !set <cmd> <role>
-  if (args.length < 2) {
-    return message.channel.send('Usage: !set <command> <role_name_or_id_or_mention> | !set <command> <role> remove | !set list');
-  }
+	// Add mode: !set <cmd> <role>
+	if (args.length < 2) {
+		return message.channel.send('Usage: !set <command> <role_name_or_id_or_mention> | !set <command> <role> remove | !set list');
+	}
 
-  const targetCmd = args[0].toLowerCase();
-  const roleArg = args.slice(1).join(' ');
+	const targetCmd = args[0].toLowerCase();
+	const roleArg = args.slice(1).join(' ');
 
-  const role = message.mentions.roles.first() ||
+	const role = message.mentions.roles.first() ||
                message.guild.roles.cache.get(roleArg) ||
                message.guild.roles.cache.find(r => r.name === roleArg) ||
                message.guild.roles.cache.find(r => r.name.toLowerCase() === roleArg.toLowerCase());
 
-  if (!role) return message.channel.send('Role not found.');
+	if (!role) return message.channel.send('Role not found.');
 
-  const arr = commandPermissions[targetCmd] || [];
-  if (arr.includes(role.id)) {
-    return message.channel.send(`Role ${role.name} is already permitted to use \`${targetCmd}\`.`);
-  }
+	const arr = commandPermissions[targetCmd] || [];
+	if (arr.includes(role.id)) {
+		return message.channel.send(`Role ${role.name} is already permitted to use \`${targetCmd}\`.`);
+	}
 
-  arr.push(role.id);
-  commandPermissions[targetCmd] = arr;
-  await savePermissions();
+	arr.push(role.id);
+	commandPermissions[targetCmd] = arr;
+	await savePermissions();
 
-  return message.channel.send(`Added role ${role.name} to permitted list for \`${targetCmd}\`.`);
+	return message.channel.send(`Added role ${role.name} to permitted list for \`${targetCmd}\`.`);
 }
+
 
 // handleMsg
 async function handleMsg(message, args) {
@@ -149,11 +150,14 @@ async function handleMsgRole(message, args, reactionRoleMap, saveMappings) {
 		const lines = [];
 		for (const [msgId, mappings] of reactionRoleMap.entries()) {
 			for (const m of mappings) {
-				const role = message.guild.roles.cache.get(m.roleId);
-				if (!role) continue;
+				const giveRole = message.guild.roles.cache.get(m.roleId);
+				if (!giveRole) continue;
 				const channelId = m.channelId || message.channel.id;
 				const link = `https://discord.com/channels/${message.guild.id}/${channelId}/${msgId}`;
-				lines.push(`<${link}> \`${m.emojiId}\` → ${role.name} (<@&${role.id}>)`);
+				const requirePart = m.requireRoleId
+					? ` (requires ${ (message.guild.roles.cache.get(m.requireRoleId) || { name: `(deleted role: ${m.requireRoleId})` }).name } <@&${m.requireRoleId}>)`
+					: '';
+				lines.push(`<${link}> \`${m.emojiId}\` → ${giveRole.name} (<@&${giveRole.id}>)${requirePart}`);
 			}
 		}
 
@@ -209,7 +213,7 @@ async function handleMsgRole(message, args, reactionRoleMap, saveMappings) {
 
 	// Add mapping flow
 	if (args.length < 3) {
-		return message.channel.send('Usage: !msgrole <message_id> <emoji> <role_name_or_mention_or_id> or !msgrole list or !msgrole remove <message_id> <emoji>');
+		return message.channel.send('Usage: !msgrole <message_id> <emoji> <give_role_name_or_mention_or_id> [require_role_name_or_mention_or_id] or !msgrole list or !msgrole remove <message_id> <emoji>');
 	}
 
 	if (!message.member.permissions.has(PermissionsBitField.Flags.ManageRoles)) {
@@ -218,20 +222,75 @@ async function handleMsgRole(message, args, reactionRoleMap, saveMappings) {
 
 	const messageId = args[0];
 	const rawEmoji = args[1];
-	const roleArg = args.slice(2).join(' ');
 	const emojiId = normalizeEmojiInput(rawEmoji);
 
-	let role = null;
-	if (message.mentions.roles.size > 0) {
-		role = message.mentions.roles.first();
+	// Determine giveRoleArg and optional requireRoleArg.
+	// Strategy: if the last arg resolves to a role, treat it as requireRole; otherwise no requireRole.
+	let giveRoleArg = null;
+	let requireRoleArg = null;
+
+	// If there are exactly 3 args after command, everything after emoji is the give role (may contain spaces)
+	if (args.length === 3) {
+		giveRoleArg = args.slice(2).join(' ');
 	}
 	else {
-		role = message.guild.roles.cache.get(roleArg) || null;
-		if (!role) role = message.guild.roles.cache.find(r => r.name === roleArg) || null;
-		if (!role) role = message.guild.roles.cache.find(r => r.name.toLowerCase() === roleArg.toLowerCase()) || null;
+		// Try to resolve last token as a role; if it resolves, treat it as requireRole
+		const possibleRequire = args[args.length - 1];
+		const tryResolveRequire = message.mentions.roles.first() ||
+            message.guild.roles.cache.get(possibleRequire) ||
+            message.guild.roles.cache.find(r => r.name === possibleRequire) ||
+            message.guild.roles.cache.find(r => r.name.toLowerCase() === possibleRequire.toLowerCase());
+
+		if (tryResolveRequire) {
+			requireRoleArg = possibleRequire;
+			giveRoleArg = args.slice(2, -1).join(' ');
+		}
+		else {
+			// last token is not a resolvable role, treat everything after emoji as give role
+			giveRoleArg = args.slice(2).join(' ');
+		}
 	}
 
-	if (!role) return message.channel.send('Role not found. Use a role mention, role ID, or exact role name.');
+	// Resolve give role
+	let giveRole = null;
+	// If a mention was used, message.mentions.roles may include it; prefer that
+	if (message.mentions.roles.size > 0) {
+		// If two roles were mentioned, the first mention is the giveRole (common case)
+		giveRole = message.mentions.roles.first();
+		// But if requireRoleArg was detected and equals the last mention, ensure we pick the correct one:
+		if (requireRoleArg && message.mentions.roles.size > 1) {
+			// try to pick the mention that matches giveRoleArg text if possible
+			const maybe = message.mentions.roles.find(r => {
+				return r.name.toLowerCase() === giveRoleArg.toLowerCase() || `<@&${r.id}>` === giveRoleArg;
+			});
+			if (maybe) giveRole = maybe;
+		}
+	}
+	if (!giveRole) {
+		giveRole = message.guild.roles.cache.get(giveRoleArg) || null;
+		if (!giveRole) giveRole = message.guild.roles.cache.find(r => r.name === giveRoleArg) || null;
+		if (!giveRole) giveRole = message.guild.roles.cache.find(r => r.name.toLowerCase() === giveRoleArg.toLowerCase()) || null;
+	}
+
+	if (!giveRole) return message.channel.send('Give role not found. Use a role mention, role ID, or exact role name.');
+
+	// Resolve require role (optional)
+	let requireRole = null;
+	if (requireRoleArg) {
+		// If require role was mentioned, it may be in message.mentions.roles; otherwise resolve by id/name
+		const mentionedRoles = message.mentions.roles;
+		if (mentionedRoles.size > 1) {
+			// If two mentions were used, the second mention is likely the requireRole
+			const mentionsArray = Array.from(mentionedRoles.values());
+			requireRole = mentionsArray.find(r => r.id !== giveRole.id) || mentionsArray[0];
+		}
+		else {
+			requireRole = message.guild.roles.cache.get(requireRoleArg) || null;
+			if (!requireRole) requireRole = message.guild.roles.cache.find(r => r.name === requireRoleArg) || null;
+			if (!requireRole) requireRole = message.guild.roles.cache.find(r => r.name.toLowerCase() === requireRoleArg.toLowerCase()) || null;
+		}
+		if (!requireRole) return message.channel.send('Require role not found. Use a role mention, role ID, or exact role name.');
+	}
 
 	let targetMessage = null;
 	let targetChannelId = null;
@@ -265,16 +324,26 @@ async function handleMsgRole(message, args, reactionRoleMap, saveMappings) {
 	if (!me.permissions.has(PermissionsBitField.Flags.ManageRoles)) {
 		return message.channel.send('I need the Manage Roles permission to assign roles.');
 	}
-	if (role.position >= me.roles.highest.position) {
+	if (giveRole.position >= me.roles.highest.position) {
 		return message.channel.send('I cannot assign that role because it is equal or higher than my highest role.');
 	}
 
 	const existing = reactionRoleMap.get(messageId) || [];
-	if (existing.some(e => e.emojiId === emojiId && e.roleId === role.id)) {
-		return message.channel.send('This emoji-role mapping already exists for that message.');
+	// Prevent duplicate mapping with same emoji, same giveRole and same requireRole
+	if (existing.some(e =>
+		e.emojiId === emojiId &&
+        e.roleId === giveRole.id &&
+        ((e.requireRoleId || null) === (requireRole ? requireRole.id : null)),
+	)) {
+		return message.channel.send('This emoji-role mapping already exists for that message with the same requirement.');
 	}
 
-	existing.push({ emojiId, roleId: role.id, channelId: targetChannelId });
+	existing.push({
+		emojiId,
+		roleId: giveRole.id,
+		channelId: targetChannelId,
+		requireRoleId: requireRole ? requireRole.id : null,
+	});
 	reactionRoleMap.set(messageId, existing);
 
 	try {
@@ -298,7 +367,10 @@ async function handleMsgRole(message, args, reactionRoleMap, saveMappings) {
 		console.warn('Could not add reaction to target message:', err?.message);
 	}
 
-	return message.channel.send(`Registered reaction-role: react with \`${rawEmoji}\` on message ${messageId} to get role <@&${role.id}>.`);
+	return message.channel.send(
+		`Registered reaction-role: react with \`${rawEmoji}\` on message ${messageId} to get role <@&${giveRole.id}>` +
+        (requireRole ? ` (requires <@&${requireRole.id}>).` : '.'),
+	);
 }
 
 // handleClr
@@ -460,9 +532,3 @@ module.exports = {
 	handleMsgRole,
 	handleClr,
 };
-
-
-
-
-
-

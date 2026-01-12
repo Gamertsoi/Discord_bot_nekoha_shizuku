@@ -179,7 +179,7 @@ client.on(Events.MessageCreate, async (message) => {
 });
 
 
-// Reaction handlers
+// Reaction handlers (updated MessageReactionAdd)
 client.on(Events.MessageReactionAdd, async (reaction, user) => {
 	try {
 		if (user.bot) return;
@@ -197,6 +197,43 @@ client.on(Events.MessageReactionAdd, async (reaction, user) => {
 
 		const member = await guild.members.fetch(user.id).catch(() => null);
 		if (!member) return;
+
+		// If a requireRoleId is set, ensure the member already has that role
+		if (mapping.requireRoleId && !member.roles.cache.has(mapping.requireRoleId)) {
+			const requiredRole = guild.roles.cache.get(mapping.requireRoleId);
+			const requiredName = requiredRole ? requiredRole.name : `role ID ${mapping.requireRoleId}`;
+
+			// Try to DM the user privately
+			try {
+				await member.send(
+					`You reacted to a message in ${reaction.message.channel} to get the role ` +
+                    `<@&${mapping.roleId}>, but you need the role **${requiredName}** first. ` +
+                    'Please obtain that role and try again.',
+				);
+			}
+			catch (dmErr) {
+				// DM failed (user may have DMs closed) — ignore, we'll attempt a short channel notice below
+				console.debug(`Could not DM ${member.user.tag}: ${dmErr?.message}`);
+			}
+
+			// Optional: short in-channel notice that will be deleted after 10s
+			try {
+				const notice = await reaction.message.channel.send({
+					content: `<@${member.id}>, you need the role **${requiredName}** to receive that role. I sent you a DM with details.`,
+				});
+				setTimeout(() => {
+					notice.delete().catch(() => {
+						// ignore
+					});
+				}, 10_000);
+			}
+			catch (chanErr) {
+				console.debug('Could not send ephemeral-like channel notice:', chanErr?.message);
+			}
+
+			// Do not grant the role
+			return;
+		}
 
 		const role = guild.roles.cache.get(mapping.roleId);
 		if (!role) return;
