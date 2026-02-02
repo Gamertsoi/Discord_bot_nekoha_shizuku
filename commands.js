@@ -1,19 +1,20 @@
 // commands.js
 const { PermissionsBitField } = require('discord.js');
 const { normalizeEmojiInput } = require('./emojiUtils');
-const OWNER_ID = process.env.OWNER_ID;
+const OWNER_ID = process.env.OWNER_ID || null;
+
 // handleSet: add/remove/list permitted roles for commands
 async function handleSet(message, args, commandPermissions, savePermissions) {
-	// Usage: !set list
+	if (!args) args = [];
+
+	// list
 	if (args.length === 1 && args[0].toLowerCase() === 'list') {
 		const entries = Object.entries(commandPermissions || {});
-		if (entries.length === 0) {
-			return message.channel.send('No command restrictions have been set.');
-		}
+		if (entries.length === 0) return message.channel.send('No command restrictions have been set.');
 
 		const lines = [];
 		for (const [cmd, roleIds] of entries) {
-			const roleNames = roleIds
+			const roleNames = (roleIds || [])
 				.map(id => {
 					const r = message.guild.roles.cache.get(id);
 					return r ? `${r.name} (<@&${id}>)` : `(deleted role: ${id})`;
@@ -22,7 +23,6 @@ async function handleSet(message, args, commandPermissions, savePermissions) {
 			lines.push(`${cmd} → ${roleNames}`);
 		}
 
-		// chunk output if too long
 		const chunkSize = 1900;
 		let out = '**Current command restrictions:**\n';
 		for (const line of lines) {
@@ -36,22 +36,19 @@ async function handleSet(message, args, commandPermissions, savePermissions) {
 		return;
 	}
 
-	// permission to run !set: owner or a configured "set-admin" role (optional)
-	// If you want to restrict who can run !set, check here (example: owner only)
+	// permission: owner only by default
 	const isOwner = message.author.id === OWNER_ID;
-	// allow owner only by default; if you want a role to also be able to set, add logic here
-	if (!isOwner) {
-		return message.channel.send('Only the bot owner can manage command permissions.');
-	}
+	if (!isOwner) return message.channel.send('Only the bot owner can manage command permissions.');
 
-	// Remove mode: !set <cmd> <role> remove
+	// remove
 	if (args.length >= 2 && args[args.length - 1].toLowerCase() === 'remove') {
 		const targetCmd = args[0].toLowerCase();
 		const roleArg = args.slice(1, -1).join(' ');
-		const role = message.mentions.roles.first() ||
-                 message.guild.roles.cache.get(roleArg) ||
-                 message.guild.roles.cache.find(r => r.name === roleArg) ||
-                 message.guild.roles.cache.find(r => r.name.toLowerCase() === roleArg.toLowerCase());
+		const role =
+      message.mentions.roles.first() ||
+      message.guild.roles.cache.get(roleArg) ||
+      message.guild.roles.cache.find(r => r.name === roleArg) ||
+      message.guild.roles.cache.find(r => r.name.toLowerCase() === roleArg.toLowerCase());
 
 		if (!role) return message.channel.send('Role not found.');
 
@@ -68,7 +65,7 @@ async function handleSet(message, args, commandPermissions, savePermissions) {
 		return message.channel.send(`Removed role ${role.name} from permitted list for \`${targetCmd}\`.`);
 	}
 
-	// Add mode: !set <cmd> <role>
+	// add
 	if (args.length < 2) {
 		return message.channel.send('Usage: !set <command> <role_name_or_id_or_mention> | !set <command> <role> remove | !set list');
 	}
@@ -76,10 +73,11 @@ async function handleSet(message, args, commandPermissions, savePermissions) {
 	const targetCmd = args[0].toLowerCase();
 	const roleArg = args.slice(1).join(' ');
 
-	const role = message.mentions.roles.first() ||
-               message.guild.roles.cache.get(roleArg) ||
-               message.guild.roles.cache.find(r => r.name === roleArg) ||
-               message.guild.roles.cache.find(r => r.name.toLowerCase() === roleArg.toLowerCase());
+	const role =
+    message.mentions.roles.first() ||
+    message.guild.roles.cache.get(roleArg) ||
+    message.guild.roles.cache.find(r => r.name === roleArg) ||
+    message.guild.roles.cache.find(r => r.name.toLowerCase() === roleArg.toLowerCase());
 
 	if (!role) return message.channel.send('Role not found.');
 
@@ -95,31 +93,30 @@ async function handleSet(message, args, commandPermissions, savePermissions) {
 	return message.channel.send(`Added role ${role.name} to permitted list for \`${targetCmd}\`.`);
 }
 
-
 // handleMsg
 async function handleMsg(message, args) {
 	const rawTarget = args[0];
 	const text = args.slice(1).join(' ');
 	if (!rawTarget || !text) return message.reply('Usage: !msg <#channel|channel_id|channel-name> <message>');
 
-	const mentioned = message.mentions.channels.first();
-	let targetChannel = mentioned;
+	let targetChannel = message.mentions.channels.first() || null;
 
 	if (!targetChannel) {
 		const idMatch = rawTarget.match(/^<#?(\d+)>?$/);
 		const maybeId = idMatch ? idMatch[1] : rawTarget;
 		try {
-			targetChannel = await message.guild.channels.fetch(maybeId).catch(() => null);
+			targetChannel = await message.guild.channels.fetch(maybeId).catch(fetchErr => {
+				console.debug('Channel fetch failed:', fetchErr?.message || fetchErr);
+				return null;
+			});
 		}
-		catch {
+		catch (fetchErr) {
+			console.debug('Channel fetch error:', fetchErr?.message || fetchErr);
 			targetChannel = null;
 		}
 	}
 
-	if (!targetChannel) {
-		targetChannel = message.guild.channels.cache.find(c => c.name === rawTarget);
-	}
-
+	if (!targetChannel) targetChannel = message.guild.channels.cache.find(c => c.name === rawTarget);
 	if (!targetChannel) return message.reply('Channel not found in this server.');
 
 	const me = message.guild.members.me;
@@ -129,21 +126,20 @@ async function handleMsg(message, args) {
 
 	try {
 		await targetChannel.send(text);
-		// Use channel.send instead of message.reply to avoid message_reference errors
 		await message.channel.send(`✅ Sent your message to <#${targetChannel.id}>`);
 	}
 	catch (err) {
-		console.error(err);
+		console.error('handleMsg send error:', err);
 		try { await message.channel.send('Failed to send message. Check permissions and channel type.'); }
-		catch {
-			// ignore
-		}
+		catch { /* ignore */ }
 	}
 }
 
 // handleMsgRole
 async function handleMsgRole(message, args, reactionRoleMap, saveMappings) {
-	// Subcommands: list, remove, add
+	if (!args) args = [];
+
+	// list
 	if (args.length === 1 && args[0].toLowerCase() === 'list') {
 		if (reactionRoleMap.size === 0) return message.channel.send('No reaction-role mappings registered.');
 
@@ -176,6 +172,7 @@ async function handleMsgRole(message, args, reactionRoleMap, saveMappings) {
 		return;
 	}
 
+	// remove
 	if (args.length >= 1 && args[0].toLowerCase() === 'remove') {
 		if (args.length < 3) return message.channel.send('Usage: !msgrole remove <message_id> <emoji>');
 		if (!message.member.permissions.has(PermissionsBitField.Flags.ManageRoles)) {
@@ -194,24 +191,16 @@ async function handleMsgRole(message, args, reactionRoleMap, saveMappings) {
 			return message.channel.send('No mapping found for that emoji on the specified message.');
 		}
 
-		if (filtered.length === 0) {
-			reactionRoleMap.delete(messageId);
-		}
-		else {
-			reactionRoleMap.set(messageId, filtered);
-		}
+		if (filtered.length === 0) reactionRoleMap.delete(messageId);
+		else reactionRoleMap.set(messageId, filtered);
 
-		try {
-			await saveMappings();
-		}
-		catch (err) {
-			console.warn('Failed to save mappings after removal:', err?.message);
-		}
+		try { await saveMappings(); }
+		catch (saveErr) { console.warn('Failed to save mappings after removal:', saveErr?.message || saveErr); }
 
 		return message.channel.send(`Removed mapping for emoji \`${rawEmoji}\` on message ${messageId}.`);
 	}
 
-	// Add mapping flow
+	// add mapping
 	if (args.length < 3) {
 		return message.channel.send('Usage: !msgrole <message_id> <emoji> <give_role_name_or_mention_or_id> [require_role_name_or_mention_or_id] or !msgrole list or !msgrole remove <message_id> <emoji>');
 	}
@@ -224,74 +213,63 @@ async function handleMsgRole(message, args, reactionRoleMap, saveMappings) {
 	const rawEmoji = args[1];
 	const emojiId = normalizeEmojiInput(rawEmoji);
 
-	// Determine giveRoleArg and optional requireRoleArg.
-	// Strategy: if the last arg resolves to a role, treat it as requireRole; otherwise no requireRole.
 	let giveRoleArg = null;
 	let requireRoleArg = null;
 
-	// If there are exactly 3 args after command, everything after emoji is the give role (may contain spaces)
 	if (args.length === 3) {
 		giveRoleArg = args.slice(2).join(' ');
 	}
 	else {
-		// Try to resolve last token as a role; if it resolves, treat it as requireRole
 		const possibleRequire = args[args.length - 1];
-		const tryResolveRequire = message.mentions.roles.first() ||
-            message.guild.roles.cache.get(possibleRequire) ||
-            message.guild.roles.cache.find(r => r.name === possibleRequire) ||
-            message.guild.roles.cache.find(r => r.name.toLowerCase() === possibleRequire.toLowerCase());
+		const tryResolveRequire =
+      message.mentions.roles.first() ||
+      message.guild.roles.cache.get(possibleRequire) ||
+      message.guild.roles.cache.find(r => r.name === possibleRequire) ||
+      message.guild.roles.cache.find(r => r.name.toLowerCase() === possibleRequire.toLowerCase());
 
 		if (tryResolveRequire) {
 			requireRoleArg = possibleRequire;
 			giveRoleArg = args.slice(2, -1).join(' ');
 		}
 		else {
-			// last token is not a resolvable role, treat everything after emoji as give role
 			giveRoleArg = args.slice(2).join(' ');
 		}
 	}
 
-	// Resolve give role
+	// resolve giveRole
 	let giveRole = null;
-	// If a mention was used, message.mentions.roles may include it; prefer that
 	if (message.mentions.roles.size > 0) {
-		// If two roles were mentioned, the first mention is the giveRole (common case)
 		giveRole = message.mentions.roles.first();
-		// But if requireRoleArg was detected and equals the last mention, ensure we pick the correct one:
 		if (requireRoleArg && message.mentions.roles.size > 1) {
-			// try to pick the mention that matches giveRoleArg text if possible
-			const maybe = message.mentions.roles.find(r => {
-				return r.name.toLowerCase() === giveRoleArg.toLowerCase() || `<@&${r.id}>` === giveRoleArg;
-			});
+			const maybe = message.mentions.roles.find(r => r.name.toLowerCase() === giveRoleArg.toLowerCase() || `<@&${r.id}>` === giveRoleArg);
 			if (maybe) giveRole = maybe;
 		}
 	}
 	if (!giveRole) {
-		giveRole = message.guild.roles.cache.get(giveRoleArg) || null;
-		if (!giveRole) giveRole = message.guild.roles.cache.find(r => r.name === giveRoleArg) || null;
-		if (!giveRole) giveRole = message.guild.roles.cache.find(r => r.name.toLowerCase() === giveRoleArg.toLowerCase()) || null;
+		giveRole = message.guild.roles.cache.get(giveRoleArg) ||
+               message.guild.roles.cache.find(r => r.name === giveRoleArg) ||
+               message.guild.roles.cache.find(r => r.name.toLowerCase() === giveRoleArg.toLowerCase()) || null;
 	}
 
 	if (!giveRole) return message.channel.send('Give role not found. Use a role mention, role ID, or exact role name.');
 
-	// Resolve require role (optional)
+	// resolve requireRole
 	let requireRole = null;
 	if (requireRoleArg) {
-		// If require role was mentioned, it may be in message.mentions.roles; otherwise resolve by id/name
 		const mentionedRoles = message.mentions.roles;
 		if (mentionedRoles.size > 1) {
-			// If two mentions were used, the second mention is likely the requireRole
 			const mentionsArray = Array.from(mentionedRoles.values());
 			requireRole = mentionsArray.find(r => r.id !== giveRole.id) || mentionsArray[0];
 		}
 		else {
-			requireRole = message.guild.roles.cache.get(requireRoleArg) || null;
-			if (!requireRole) requireRole = message.guild.roles.cache.find(r => r.name === requireRoleArg) || null;
-			if (!requireRole) requireRole = message.guild.roles.cache.find(r => r.name.toLowerCase() === requireRoleArg.toLowerCase()) || null;
+			requireRole = message.guild.roles.cache.get(requireRoleArg) ||
+                    message.guild.roles.cache.find(r => r.name === requireRoleArg) ||
+                    message.guild.roles.cache.find(r => r.name.toLowerCase() === requireRoleArg.toLowerCase()) || null;
 		}
 		if (!requireRole) return message.channel.send('Require role not found. Use a role mention, role ID, or exact role name.');
 	}
 
+	// find target message
 	let targetMessage = null;
 	let targetChannelId = null;
 	try {
@@ -307,8 +285,8 @@ async function handleMsgRole(message, args, reactionRoleMap, saveMappings) {
 					break;
 				}
 			}
-			catch {
-				// ignore fetch errors for individual channels
+			catch (fetchErr) {
+				console.debug('Message fetch failed in channel:', ch.id, fetchErr?.message || fetchErr);
 			}
 		}
 	}
@@ -329,11 +307,10 @@ async function handleMsgRole(message, args, reactionRoleMap, saveMappings) {
 	}
 
 	const existing = reactionRoleMap.get(messageId) || [];
-	// Prevent duplicate mapping with same emoji, same giveRole and same requireRole
 	if (existing.some(e =>
 		e.emojiId === emojiId &&
-        e.roleId === giveRole.id &&
-        ((e.requireRoleId || null) === (requireRole ? requireRole.id : null)),
+    e.roleId === giveRole.id &&
+    ((e.requireRoleId || null) === (requireRole ? requireRole.id : null)),
 	)) {
 		return message.channel.send('This emoji-role mapping already exists for that message with the same requirement.');
 	}
@@ -346,12 +323,8 @@ async function handleMsgRole(message, args, reactionRoleMap, saveMappings) {
 	});
 	reactionRoleMap.set(messageId, existing);
 
-	try {
-		await saveMappings();
-	}
-	catch (err) {
-		console.warn('Failed to save mappings:', err?.message);
-	}
+	try { await saveMappings(); }
+	catch (saveErr) { console.warn('Failed to save mappings:', saveErr?.message || saveErr); }
 
 	try {
 		const customMatch = emojiId.match(/^([a-zA-Z0-9_]+):(\d+)$/);
@@ -363,44 +336,42 @@ async function handleMsgRole(message, args, reactionRoleMap, saveMappings) {
 			await targetMessage.react(emojiId);
 		}
 	}
-	catch (err) {
-		console.warn('Could not add reaction to target message:', err?.message);
+	catch (reactErr) {
+		console.warn('Could not add reaction to target message:', reactErr?.message || reactErr);
 	}
 
 	return message.channel.send(
 		`Registered reaction-role: react with \`${rawEmoji}\` on message ${messageId} to get role <@&${giveRole.id}>` +
-        (requireRole ? ` (requires <@&${requireRole.id}>).` : '.'),
+    (requireRole ? ` (requires <@&${requireRole.id}>).` : '.'),
 	);
 }
 
 // handleClr
 async function handleClr(message, args) {
-	if (args.length < 2) {
-		return message.channel.send('Usage: !clr <#channel|channel_id> <number|all>');
-	}
-
+	if (!args || args.length < 2) return message.channel.send('Usage: !clr <#channel|channel_id> <number|all>');
 	if (!message.member.permissions.has(PermissionsBitField.Flags.ManageMessages)) {
 		return message.channel.send('You need the Manage Messages permission to use this command.');
 	}
 
 	const channelArg = args[0];
-	const countArg = args[1].toLowerCase();
+	const countArg = String(args[1]).toLowerCase();
 
 	let targetChannel = message.mentions.channels.first() || null;
 	if (!targetChannel) {
 		const idMatch = channelArg.match(/^<#?(\d+)>?$/);
 		const maybeId = idMatch ? idMatch[1] : channelArg;
 		try {
-			targetChannel = await message.guild.channels.fetch(maybeId).catch(() => null);
+			targetChannel = await message.guild.channels.fetch(maybeId).catch(fetchErr => {
+				console.debug('Channel fetch failed:', fetchErr?.message || fetchErr);
+				return null;
+			});
 		}
-		catch (err) {
-			console.debug(`fetch channel error: ${err?.message}`);
+		catch (fetchErr) {
+			console.debug('Channel fetch error:', fetchErr?.message || fetchErr);
 			targetChannel = null;
 		}
 	}
-	if (!targetChannel) {
-		targetChannel = message.guild.channels.cache.find(c => c.name === channelArg);
-	}
+	if (!targetChannel) targetChannel = message.guild.channels.cache.find(c => c.name === channelArg);
 	if (!targetChannel) return message.channel.send('Channel not found in this server.');
 
 	const me = message.guild.members.me;
@@ -415,7 +386,6 @@ async function handleClr(message, args) {
 		}
 	}
 
-	// Helper: bulk delete collection (up to 100)
 	async function bulkDeleteCollection(col) {
 		if (!col || col.size === 0) return 0;
 		try {
@@ -423,12 +393,11 @@ async function handleClr(message, args) {
 			return col.size;
 		}
 		catch (err) {
-			console.warn('bulkDelete failed:', err?.message);
+			console.warn('bulkDelete failed:', err?.message || err);
 			return 0;
 		}
 	}
 
-	// Option: exclude the command message from deletion to allow replies
 	const excludeCommandId = message.id;
 
 	if (countArg === 'all') {
@@ -438,7 +407,6 @@ async function handleClr(message, args) {
 				const fetched = await targetChannel.messages.fetch({ limit: 100 });
 				if (!fetched || fetched.size === 0) break;
 
-				// exclude the command message if it's in the same channel
 				const filteredFetched = fetched.filter(m => m.id !== excludeCommandId);
 
 				const now = Date.now();
@@ -457,36 +425,28 @@ async function handleClr(message, args) {
 						totalDeleted++;
 						await new Promise(res => setTimeout(res, 250));
 					}
-					catch (err) {
-						console.debug(`Failed to delete old message ${oldMsg.id}: ${err?.message}`);
+					catch (delErr) {
+						console.debug(`Failed to delete old message ${oldMsg.id}: ${delErr?.message || delErr}`);
 					}
 				}
 
 				if (fetched.size < 100) break;
 			}
 
-			try {
-				await message.channel.send(`Cleared messages in <#${targetChannel.id}>. Total deleted (approx): ${totalDeleted}`);
-			}
-			catch (err) {
-				console.warn('Could not send confirmation message to channel:', err?.message);
-			}
+			try { await message.channel.send(`Cleared messages in <#${targetChannel.id}>. Total deleted (approx): ${totalDeleted}`); }
+			catch (replyErr) { console.debug('Could not send clear confirmation:', replyErr?.message || replyErr); }
 			return;
 		}
 		catch (err) {
 			console.error('Error clearing all messages:', err);
 			try { await message.channel.send('Failed to clear messages. Check my permissions and try again.'); }
-			catch {
-				// ignore
-			}
+			catch { /* ignore */ }
 			return;
 		}
 	}
 
 	const num = parseInt(countArg, 10);
-	if (Number.isNaN(num) || num <= 0) {
-		return message.channel.send('Please provide a valid number greater than 0, or use `all`.');
-	}
+	if (Number.isNaN(num) || num <= 0) return message.channel.send('Please provide a valid number greater than 0, or use `all`.');
 
 	let remaining = num;
 	let totalDeleted = 0;
@@ -496,7 +456,6 @@ async function handleClr(message, args) {
 			const fetched = await targetChannel.messages.fetch({ limit: fetchLimit });
 			if (!fetched || fetched.size === 0) break;
 
-			// exclude the command message if present
 			const toDelete = fetched.filter(m => m.id !== excludeCommandId);
 			if (toDelete.size === 0) break;
 
@@ -508,20 +467,14 @@ async function handleClr(message, args) {
 			await new Promise(res => setTimeout(res, 250));
 		}
 
-		try {
-			await message.channel.send(`Deleted approximately ${totalDeleted} message(s) from <#${targetChannel.id}>.`);
-		}
-		catch (err) {
-			console.warn('Could not send confirmation message to channel:', err?.message);
-		}
+		try { await message.channel.send(`Deleted approximately ${totalDeleted} message(s) from <#${targetChannel.id}>.`); }
+		catch (replyErr) { console.debug('Could not send deletion confirmation:', replyErr?.message || replyErr); }
 		return;
 	}
 	catch (err) {
 		console.error('Error deleting messages:', err);
 		try { await message.channel.send('Failed to delete messages. Check my permissions and try again.'); }
-		catch {
-			// ignore
-		}
+		catch { /* ignore */ }
 		return;
 	}
 }
