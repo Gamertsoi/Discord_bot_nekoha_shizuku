@@ -202,13 +202,13 @@ client.on(Events.MessageReactionAdd, async (reaction, user) => {
 		if (mapping.requireRoleId && !member.roles.cache.has(mapping.requireRoleId)) {
 			const requiredRole = guild.roles.cache.get(mapping.requireRoleId);
 			const requiredName = requiredRole ? requiredRole.name : `role ID ${mapping.requireRoleId}`;
-
+			const roleName = role ? role.name : `role ID ${mapping.roleId}`;
 			// Try to DM the user privately
 			try {
 				await member.send(
-					`You reacted to a message in ${reaction.message.channel} to get the role ` +
-                    `<@&${mapping.roleId}>, but you need the role **${requiredName}** first. ` +
-                    'Please obtain that role and try again.',
+					`You reacted to a message in ${reaction.message.channel} to get the role **${roleName}**, ` +
+        			`but you need the role **${requiredName}** first. ` +
+        			'Please obtain that role and try again.',
 				);
 			}
 			catch (dmErr) {
