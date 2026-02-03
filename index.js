@@ -1,4 +1,5 @@
-/* index.js */
+/* eslint-disable no-inline-comments */
+// index.js
 const fs = require('fs').promises;
 const path = require('path');
 const {
@@ -33,7 +34,7 @@ const client = new Client({
 	partials: [Partials.Message, Partials.Channel, Partials.Reaction],
 });
 
-// --- Load / Save mappings ---
+// Load/save helpers
 async function loadMappings() {
 	try {
 		const raw = await fs.readFile(DATA_FILE, 'utf8');
@@ -86,7 +87,6 @@ async function saveMappings() {
 	}
 }
 
-// --- Load / Save permissions ---
 async function loadPermissions() {
 	try {
 		const raw = await fs.readFile(PERM_FILE, 'utf8');
@@ -133,17 +133,6 @@ async function savePermissions() {
 	}
 }
 
-// --- Permission helper ---
-function canRunCommand(command, member) {
-	if (!member) return false;
-	if (String(member.id) === String(OWNER_ID)) return true;
-
-	const required = commandPermissions[command];
-	if (!required || required.length === 0) return false;
-	return required.some(roleId => member.roles.cache.has(roleId));
-}
-
-// --- Startup ---
 loadMappings().catch(err => console.error('loadMappings error:', err));
 loadPermissions().catch(err => console.error('loadPermissions error:', err));
 
@@ -151,12 +140,20 @@ process.on('unhandledRejection', (reason, promise) => {
 	console.error('Unhandled Rejection at:', promise, 'reason:', reason);
 });
 
-// --- Message handler (prefix commands) ---
+// Permission helper
+function canRunCommand(command, member) {
+	if (!member) return false;
+	if (String(member.id) === String(OWNER_ID)) return true;
+	const required = commandPermissions[command];
+	if (!required || required.length === 0) return false;
+	return required.some(roleId => member.roles.cache.has(roleId));
+}
+
+// Message handler
 client.on(Events.MessageCreate, async (message) => {
 	if (message.author.bot) return;
 	const content = message.content.trim();
 	if (!content.startsWith(PREFIX)) return;
-
 	const [command, ...rest] = content.slice(PREFIX.length).split(/\s+/);
 
 	if (!canRunCommand(command, message.member)) {
@@ -185,141 +182,83 @@ client.on(Events.MessageCreate, async (message) => {
 	}
 });
 
-// --- Interaction (slash command) handler ---
 client.on(Events.InteractionCreate, async (interaction) => {
-	if (!interaction.isChatInputCommand()) return;
-	const cmd = interaction.commandName;
-
-	try {
-		if (!canRunCommand(cmd, interaction.member)) {
-			await interaction.reply({ content: 'You do not have permission to use this command.', ephemeral: true });
-			return;
-		}
-
-		// Defer early for any async work
-		await interaction.deferReply({ ephemeral: true });
-
-		if (cmd === 'msg') {
-			const channel = interaction.options.getChannel('channel');
-			const text = interaction.options.getString('text');
-			if (!channel || !text) {
-				await interaction.editReply('Invalid options.');
-				return;
-			}
-			await channel.send(text);
-			await interaction.editReply(`✅ Sent your message to ${channel}`);
-			return;
-		}
-
-		if (cmd === 'msgrole') {
-			const messageId = interaction.options.getString('message_id');
-			const emoji = interaction.options.getString('emoji');
-			const giveRole = interaction.options.getRole('give_role');
-			const requireRole = interaction.options.getRole('require_role') || null;
-
-			if (!messageId || !emoji || !giveRole) {
-				await interaction.editReply('Missing required options.');
-				return;
-			}
-
-			// Minimal shim to reuse message-based handler
-			const shim = {
-				guild: interaction.guild,
-				channel: interaction.channel,
-				mentions: {
-					roles: new Map(giveRole ? [[giveRole.id, giveRole]] : []),
-				},
-				member: interaction.member,
-				author: interaction.user,
-			};
-
-			// Pass role objects directly in args for the interaction path
-			await handleMsgRole(shim, [messageId, emoji, giveRole, requireRole], reactionRoleMap, saveMappings);
-
-			try {
-				await interaction.editReply('Registered reaction-role mapping.');
-			}
-			catch (err) {
-				console.debug('Could not edit interaction reply:', err?.message || err);
-			}
-			return;
-		}
-
-		if (cmd === 'clr') {
-			const channel = interaction.options.getChannel('channel');
-			const count = interaction.options.getString('count');
-			if (!channel || !count) {
-				await interaction.editReply('Invalid options.');
-				return;
-			}
-
-			const shim = {
-				guild: interaction.guild,
-				channel,
-				mentions: { channels: new Map([[channel.id, channel]]) },
-				member: interaction.member,
-				id: interaction.id,
-			};
-
-			await handleClr(shim, [channel.id, count]);
-			try {
-				await interaction.editReply(`Clear command processed for ${channel}.`);
-			}
-			catch (err) {
-				console.debug('Could not edit interaction reply:', err?.message || err);
-			}
-			return;
-		}
-
-		if (cmd === 'set') {
-			if (String(interaction.user.id) !== String(OWNER_ID)) {
-				await interaction.editReply('Only the bot owner can manage permissions.');
-				return;
-			}
-
-			const commandName = interaction.options.getString('command');
-			const action = interaction.options.getString('action');
-			const role = interaction.options.getRole('role') || null;
-
-			const shim = {
-				guild: interaction.guild,
-				channel: interaction.channel,
-				mentions: { roles: role ? new Map([[role.id, role]]) : new Map() },
-				member: interaction.member,
-				author: interaction.user,
-			};
-
-			const args = action === 'list' ? ['list'] : [commandName, role, action];
-			await handleSet(shim, args, commandPermissions, savePermissions);
-
-			try {
-				await interaction.editReply('Permissions updated.');
-			}
-			catch (err) {
-				console.debug('Could not edit interaction reply:', err?.message || err);
-			}
-			return;
-		}
-
-		await interaction.editReply('Unknown command.');
-	}
-	catch (err) {
-		console.error('Interaction error:', err);
+	// Button interactions for claim flow (place at top of InteractionCreate handler)
+	if (interaction.isButton && interaction.customId && interaction.customId.startsWith('rr|')) {
 		try {
-			if (interaction.deferred || interaction.replied) {
-				await interaction.editReply('An internal error occurred while processing your command.');
+			const parts = interaction.customId.split('|');
+			const messageId = parts[1];
+			const emojiId = decodeURIComponent(parts[2] || '');
+			const roleId = parts[3];
+
+			const mappings = reactionRoleMap.get(messageId) || [];
+			const mapping = mappings.find(m => m.emojiId === emojiId && m.roleId === roleId);
+
+			if (!mapping) {
+				await interaction.reply({ content: 'This role mapping no longer exists.', ephemeral: true });
+				return;
+			}
+
+			const guild = interaction.guild;
+			if (!guild) {
+				await interaction.reply({ content: 'Guild context not available.', ephemeral: true });
+				return;
+			}
+
+			const member = interaction.member;
+			if (!member) {
+				await interaction.reply({ content: 'Member info not available.', ephemeral: true });
+				return;
+			}
+
+			// If user lacks the required role, reply ephemerally and return (no DM, no public message)
+			if (mapping.requireRoleId && !member.roles.cache.has(mapping.requireRoleId)) {
+				const requiredRole = guild.roles.cache.get(mapping.requireRoleId);
+				const requiredName = requiredRole ? requiredRole.name : `role ID ${mapping.requireRoleId}`;
+				await interaction.reply({
+					content: `You need the role **${requiredName}** before you can claim this role.`,
+					ephemeral: true,
+				});
+				return;
+			}
+
+			// Resolve role and check bot permissions
+			const role = guild.roles.cache.get(mapping.roleId);
+			if (!role) {
+				await interaction.reply({ content: 'Target role not found (it may have been deleted).', ephemeral: true });
+				return;
+			}
+
+			const me = guild.members.me;
+			if (!me.permissions.has(PermissionsBitField.Flags.ManageRoles)) {
+				await interaction.reply({ content: 'I do not have permission to manage roles.', ephemeral: true });
+				return;
+			}
+			if (role.position >= me.roles.highest.position) {
+				await interaction.reply({ content: 'I cannot assign that role due to role hierarchy.', ephemeral: true });
+				return;
+			}
+
+			// Add role if user doesn't already have it
+			if (!member.roles.cache.has(role.id)) {
+				await member.roles.add(role);
+				await interaction.reply({ content: `You have been given the role **${role.name}**.`, ephemeral: true });
 			}
 			else {
-				await interaction.reply({ content: 'An internal error occurred while processing your command.', ephemeral: true });
+				await interaction.reply({ content: `You already have the role **${role.name}**.`, ephemeral: true });
 			}
 		}
-		catch (replyErr) {
-			console.debug('Failed to send error reply:', replyErr?.message || replyErr);
+		catch (err) {
+			console.error('Error handling claim button interaction:', err);
+			try { if (!interaction.replied) await interaction.reply({ content: 'An error occurred.', ephemeral: true }); }
+			catch { /* ignore */ }
 		}
+		return;
 	}
+	// ...existing code...
 });
 
-// --- Reaction handlers ---
+// Reaction handlers (fallback for reaction-based assignment)
 client.on(Events.MessageReactionAdd, async (reaction, user) => {
 	try {
 		if (user.bot) return;
@@ -341,39 +280,20 @@ client.on(Events.MessageReactionAdd, async (reaction, user) => {
 		});
 		if (!member) return;
 
-		// Resolve the role up front to avoid reference-before-init errors
 		const role = guild.roles.cache.get(mapping.roleId);
-		const roleName = role ? role.name : `role ID ${mapping.roleId}`;
+		// const roleName = role ? role.name : `role ID ${mapping.roleId}`;
 
-		// If a requireRoleId is set, ensure the member already has that role
 		if (mapping.requireRoleId && !member.roles.cache.has(mapping.requireRoleId)) {
-			const requiredRole = guild.roles.cache.get(mapping.requireRoleId);
-			const requiredName = requiredRole ? requiredRole.name : `role ID ${mapping.requireRoleId}`;
-
+			// Remove the user's reaction to avoid confusion (best-effort)
 			try {
-				await member.send(
-					`You reacted to a message in ${reaction.message.channel} to get the role **${roleName}**, ` +
-          `but you need the role **${requiredName}** first. Please obtain that role and try again.`,
-				);
+				// reaction.users.remove may require the bot to have Manage Messages permission in some contexts
+				await reaction.users.remove(user.id).catch(() => null);
 			}
-			catch (dmErr) {
-				console.debug(`Could not DM ${member.user.tag}: ${dmErr?.message || dmErr}`);
+			catch (removeErr) {
+				// ignore removal errors; we intentionally do not notify publicly or DM
+				console.debug('Could not remove reaction:', removeErr?.message || removeErr);
 			}
-
-			try {
-				const notice = await reaction.message.channel.send({
-					content: `<@${member.id}>, you need the role **${requiredName}** to receive that role. I sent you a DM with details.`,
-				});
-				setTimeout(() => {
-					notice.delete().catch(deleteErr => {
-						console.debug('Failed to delete notice:', deleteErr?.message || deleteErr);
-					});
-				}, 10_000);
-			}
-			catch (chanErr) {
-				console.debug('Could not send ephemeral-like channel notice:', chanErr?.message || chanErr);
-			}
-
+			// Do not DM or send a public message; return silently
 			return;
 		}
 
@@ -431,7 +351,7 @@ client.on(Events.MessageReactionRemove, async (reaction, user) => {
 	}
 });
 
-// --- Cleanup handlers ---
+// Cleanup handlers
 client.on(Events.MessageDelete, async (message) => {
 	try {
 		const msgId = message.id;
