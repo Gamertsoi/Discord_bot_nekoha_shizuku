@@ -184,6 +184,7 @@ client.on(Events.MessageCreate, async (message) => {
 
 client.on(Events.InteractionCreate, async (interaction) => {
 	// Button interactions for claim flow (place at top of InteractionCreate handler)
+	i;// Button interactions for claim flow
 	if (interaction.isButton && interaction.customId && interaction.customId.startsWith('rr|')) {
 		try {
 			const parts = interaction.customId.split('|');
@@ -255,10 +256,10 @@ client.on(Events.InteractionCreate, async (interaction) => {
 		}
 		return;
 	}
-	// ...existing code...
+
 });
 
-// Reaction handlers (fallback for reaction-based assignment)
+// Reaction handlers
 client.on(Events.MessageReactionAdd, async (reaction, user) => {
 	try {
 		if (user.bot) return;
@@ -283,19 +284,19 @@ client.on(Events.MessageReactionAdd, async (reaction, user) => {
 		const role = guild.roles.cache.get(mapping.roleId);
 		// const roleName = role ? role.name : `role ID ${mapping.roleId}`;
 
+		// If user lacks the required role: remove their reaction and return silently
 		if (mapping.requireRoleId && !member.roles.cache.has(mapping.requireRoleId)) {
-			// Remove the user's reaction to avoid confusion (best-effort)
 			try {
-				// reaction.users.remove may require the bot to have Manage Messages permission in some contexts
+				// Best-effort removal; requires Manage Messages in some contexts
 				await reaction.users.remove(user.id).catch(() => null);
 			}
 			catch (removeErr) {
-				// ignore removal errors; we intentionally do not notify publicly or DM
 				console.debug('Could not remove reaction:', removeErr?.message || removeErr);
 			}
 			// Do not DM or send a public message; return silently
 			return;
 		}
+
 
 		if (!role) return;
 
