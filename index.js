@@ -34,7 +34,7 @@ const client = new Client({
 	partials: [Partials.Message, Partials.Channel, Partials.Reaction],
 });
 
-// Load/save helpers
+// --- Load / Save mappings ---
 async function loadMappings() {
 	try {
 		const raw = await fs.readFile(DATA_FILE, 'utf8');
@@ -87,6 +87,7 @@ async function saveMappings() {
 	}
 }
 
+// --- Load / Save permissions ---
 async function loadPermissions() {
 	try {
 		const raw = await fs.readFile(PERM_FILE, 'utf8');
@@ -140,7 +141,7 @@ process.on('unhandledRejection', (reason, promise) => {
 	console.error('Unhandled Rejection at:', promise, 'reason:', reason);
 });
 
-// Permission helper
+// --- Permission helper ---
 function canRunCommand(command, member) {
 	if (!member) return false;
 	if (String(member.id) === String(OWNER_ID)) return true;
@@ -149,11 +150,12 @@ function canRunCommand(command, member) {
 	return required.some(roleId => member.roles.cache.has(roleId));
 }
 
-// Message handler
+// --- Message handler (prefix commands) ---
 client.on(Events.MessageCreate, async (message) => {
 	if (message.author.bot) return;
 	const content = message.content.trim();
 	if (!content.startsWith(PREFIX)) return;
+
 	const [command, ...rest] = content.slice(PREFIX.length).split(/\s+/);
 
 	if (!canRunCommand(command, message.member)) {
@@ -182,9 +184,9 @@ client.on(Events.MessageCreate, async (message) => {
 	}
 });
 
+// --- Interaction (buttons + slash commands) handler ---
 client.on(Events.InteractionCreate, async (interaction) => {
-	// Button interactions for claim flow (place at top of InteractionCreate handler)
-	i;// Button interactions for claim flow
+	// Button interactions for claim flow
 	if (interaction.isButton && interaction.customId && interaction.customId.startsWith('rr|')) {
 		try {
 			const parts = interaction.customId.split('|');
@@ -257,9 +259,124 @@ client.on(Events.InteractionCreate, async (interaction) => {
 		return;
 	}
 
+	// Slash command handling
+	if (!interaction.isChatInputCommand()) return;
+	const cmd = interaction.commandName;
+
+	try {
+		if (!canRunCommand(cmd, interaction.member)) {
+			await interaction.reply({ content: 'You do not have permission to use this command.', ephemeral: true });
+			return;
+		}
+
+		await interaction.deferReply({ ephemeral: true });
+
+		if (cmd === 'msg') {
+			const channel = interaction.options.getChannel('channel');
+			const text = interaction.options.getString('text');
+			if (!channel || !text) {
+				await interaction.editReply('Invalid options.');
+				return;
+			}
+			await channel.send(text);
+			await interaction.editReply(`✅ Sent your message to ${channel}`);
+			return;
+		}
+
+		if (cmd === 'msgrole') {
+			const messageId = interaction.options.getString('message_id');
+			const emoji = interaction.options.getString('emoji');
+			const giveRole = interaction.options.getRole('give_role');
+			const requireRole = interaction.options.getRole('require_role') || null;
+
+			if (!messageId || !emoji || !giveRole) {
+				await interaction.editReply('Missing required options.');
+				return;
+			}
+
+			// Minimal shim to reuse message-based handler
+			const shim = {
+				guild: interaction.guild,
+				channel: interaction.channel,
+				mentions: { roles: new Map(giveRole ? [[giveRole.id, giveRole]] : []) },
+				member: interaction.member,
+				author: interaction.user,
+			};
+
+			await handleMsgRole(shim, [messageId, emoji, giveRole, requireRole], reactionRoleMap, saveMappings);
+
+			try { await interaction.editReply('Registered reaction-role mapping.'); }
+			catch (err) { console.debug('Could not edit interaction reply:', err?.message || err); }
+			return;
+		}
+
+		if (cmd === 'clr') {
+			const channel = interaction.options.getChannel('channel');
+			const count = interaction.options.getString('count');
+			if (!channel || !count) {
+				await interaction.editReply('Invalid options.');
+				return;
+			}
+
+			const shim = {
+				guild: interaction.guild,
+				channel,
+				mentions: { channels: new Map([[channel.id, channel]]) },
+				member: interaction.member,
+				id: interaction.id,
+			};
+
+			await handleClr(shim, [channel.id, count]);
+			try { await interaction.editReply(`Clear command processed for ${channel}.`); }
+			catch (err) { console.debug('Could not edit interaction reply:', err?.message || err); }
+			return;
+		}
+
+		if (cmd === 'set') {
+			if (String(interaction.user.id) !== String(OWNER_ID)) {
+				await interaction.editReply('Only the bot owner can manage permissions.');
+				return;
+			}
+
+			const commandName = interaction.options.getString('command');
+			const action = interaction.options.getString('action');
+			const role = interaction.options.getRole('role') || null;
+
+			const shim = {
+				guild: interaction.guild,
+				channel: interaction.channel,
+				mentions: { roles: role ? new Map([[role.id, role]]) : new Map() },
+				member: interaction.member,
+				author: interaction.user,
+			};
+
+			const args = action === 'list' ? ['list'] : [commandName, role, action];
+			await handleSet(shim, args, commandPermissions, savePermissions);
+
+			try { await interaction.editReply('Permissions updated.'); }
+			catch (err) { console.debug('Could not edit interaction reply:', err?.message || err); }
+			return;
+		}
+
+		await interaction.editReply('Unknown command.');
+	}
+	catch (err) {
+		console.error('Interaction error:', err);
+		try {
+			if (interaction.deferred || interaction.replied) {
+				await interaction.editReply('An internal error occurred while processing your command.');
+			}
+			else {
+				await interaction.reply({ content: 'An internal error occurred while processing your command.', ephemeral: true });
+			}
+		}
+		catch (replyErr) {
+			console.debug('Failed to send error reply:', replyErr?.message || replyErr);
+		}
+	}
 });
 
-// Reaction handlers
+// --- Reaction handlers ---
 client.on(Events.MessageReactionAdd, async (reaction, user) => {
 	try {
 		if (user.bot) return;
@@ -282,21 +399,39 @@ client.on(Events.MessageReactionAdd, async (reaction, user) => {
 		if (!member) return;
 
 		const role = guild.roles.cache.get(mapping.roleId);
-		// const roleName = role ? role.name : `role ID ${mapping.roleId}`;
 
-		// If user lacks the required role: remove their reaction and return silently
+		// If user lacks the required role: post a short temporary channel notice and return
 		if (mapping.requireRoleId && !member.roles.cache.has(mapping.requireRoleId)) {
 			try {
-				// Best-effort removal; requires Manage Messages in some contexts
+				const requiredRole = guild.roles.cache.get(mapping.requireRoleId);
+				const requiredName = requiredRole ? requiredRole.name : `role ID ${mapping.requireRoleId}`;
+
+				// Channel mentions (replace IDs if you want different channels)
+				const channelMentionA = '<#1458842313210990695>';
+				const channelMentionB = '<#1458842736399614154>';
+				const noticeText = `<@${member.id}>, you need to claim **${requiredName}** before claiming this role. Click ${channelMentionA} or ${channelMentionB} to get the role.`;
+
+				const notice = await reaction.message.channel.send({ content: noticeText });
+
+				// Delete the notice after 10 seconds to keep the channel tidy
+				setTimeout(() => {
+					notice.delete().catch(() => null);
+				}, 10_000);
+			}
+			catch (err) {
+				console.debug('Could not send ephemeral-like channel notice:', err?.message || err);
+			}
+
+			// Optionally remove the user's reaction to avoid confusion (best-effort)
+			try {
 				await reaction.users.remove(user.id).catch(() => null);
 			}
-			catch (removeErr) {
-				console.debug('Could not remove reaction:', removeErr?.message || removeErr);
+			catch {
+				// ignore removal errors
 			}
-			// Do not DM or send a public message; return silently
+
 			return;
 		}
-
 
 		if (!role) return;
 
@@ -352,7 +487,7 @@ client.on(Events.MessageReactionRemove, async (reaction, user) => {
 	}
 });
 
-// Cleanup handlers
+// --- Cleanup handlers ---
 client.on(Events.MessageDelete, async (message) => {
 	try {
 		const msgId = message.id;
@@ -413,3 +548,4 @@ client.login(token).catch(err => {
 	console.error('Failed to login:', err);
 	process.exit(1);
 });
+
